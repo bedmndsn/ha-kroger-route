@@ -1,0 +1,23 @@
+refresh_route:
+  name: Refresh route
+  description: Immediately re-fetch the shopping list and rebuild the walking route.
+  fields:
+    force_refresh:
+      name: Force Refresh
+      description: Bypass local cache and query Kroger API fresh.
+      required: false
+      default: false
+      selector:
+        boolean: {}
+
+process_list:
+  name: Process list
+  description: Process and sort the shopping list into store walking order.
+  fields:
+    force_refresh:
+      name: Force Refresh
+      description: Bypass local cache and query Kroger API fresh.
+      required: false
+      default: false
+      selector:
+        boolean: {}

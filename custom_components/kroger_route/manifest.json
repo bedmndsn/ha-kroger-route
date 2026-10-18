@@ -1,0 +1,12 @@
+{
+  "domain": "kroger_route",
+  "name": "Kroger Route Planner",
+  "codeowners": ["@bedmndsn"],
+  "config_flow": true,
+  "dependencies": ["todo"],
+  "documentation": "https://github.com/bedmndsn/ha-kroger-route",
+  "issue_tracker": "https://github.com/bedmndsn/ha-kroger-route/issues",
+  "version": "1.0.0",
+  "iot_class": "cloud_polling",
+  "requirements": []
+}

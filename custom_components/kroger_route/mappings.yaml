@@ -1,0 +1,34 @@
+# Kroger & Ralphs Route Planner - Item Mappings & Noise Filtering
+# This file is loaded dynamically by the integration.
+# You can also copy this file to /config/mappings.yaml to persist customizations across updates.
+
+# Items or phrases to discard completely (voice noise, list headers, non-groceries)
+ignore_items:
+  - "shopping list"
+  - "grocery list"
+  - "groceries"
+  - "ralphs list"
+  - "ralph's list"
+  - "my list"
+  - "kroger list"
+  - "items"
+  - "item"
+  - "things to get"
+  - "what to buy"
+  - "to buy"
+
+# Common voice-to-text, OCR errors, or specific brand substitutions
+typos:
+  "milkk": "milk"
+  "almond milkk": "almond milk"
+  "bannana": "banana"
+  "bannanas": "bananas"
+  "chiken": "chicken"
+  "yogrt": "yogurt"
+  "oj": "orange juice"
+  "pb": "peanut butter"
+
+# Exact product ID / UPC overrides (bypasses fuzzy search)
+direct_product_ids: {}
+  # "bread": "0007341001355"
+  # "enjoy life mini chips": "0085352200030"

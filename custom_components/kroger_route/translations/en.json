@@ -1,0 +1,83 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Kroger API Credentials",
+        "description": "Enter your Client ID and Client Secret from developer.kroger.com",
+        "data": {
+          "client_id": "Client ID",
+          "client_secret": "Client Secret"
+        }
+      },
+      "store": {
+        "title": "Select Home Store",
+        "description": "Enter your ZIP Code to search nearby stores, or provide a store location ID directly.",
+        "data": {
+          "zip_code": "ZIP Code (or leave blank if entering ID below)",
+          "location_id": "Store Location ID (Optional if searching by ZIP)"
+        }
+      },
+      "todo": {
+        "title": "Select Shopping List & Layout",
+        "description": "Select the To-Do list entity that contains your grocery list and your store walking layout.",
+        "data": {
+          "todo_entity": "To-Do List Entity",
+          "layout_preset": "Store Layout Preset"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Invalid Client ID or Client Secret.",
+      "cannot_connect": "Could not connect to the Kroger API. Please try again.",
+      "no_stores_found": "No Kroger stores found for that ZIP code.",
+      "product_search_unavailable": "Product search is not available for this store location (PRODUCT-2029). Please choose a different store."
+    },
+    "abort": {
+      "already_configured": "This store is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Store Route Options",
+        "description": "Edit list routing, ignore phrases, typo/brand corrections, and exact product IDs. All inputs are completely case-insensitive (e.g. 'Milk' and 'milk' match identically). One entry per line. For corrections use: wrong = correct",
+        "data": {
+          "todo_entity": "To-Do List Entity",
+          "layout_preset": "Store Layout Preset",
+          "custom_layout": "Custom Department Order (Comma Separated)",
+          "ignore_items": "Ignore Items (case-insensitive, one per line)",
+          "typo_fixes": "Typo / Brand Corrections (wrong = correct)",
+          "direct_product_ids": "Direct Product IDs (item = productId)",
+          "proxy_url": "Optional Proxy URL (for development/troubleshooting)"
+        },
+        "data_description": {
+          "ignore_items": "List headers/noise phrases to skip completely. Case-insensitive (e.g. 'Shopping List' matches 'shopping list').",
+          "typo_fixes": "Map messy voice/OCR text to the search term you want. Case-insensitive. Example: yogrt = yogurt",
+          "direct_product_ids": "Bypass search with an exact Kroger product ID/UPC. Case-insensitive. Example: Maple Syrup = 0001111050123"
+        }
+      }
+    }
+  },
+  "services": {
+    "refresh_route": {
+      "name": "Refresh Route",
+      "description": "Immediately re-fetch the shopping list and rebuild the walking route.",
+      "fields": {
+        "force_refresh": {
+          "name": "Force Refresh",
+          "description": "Bypass local cache and query Kroger fresh."
+        }
+      }
+    },
+    "process_list": {
+      "name": "Process List",
+      "description": "Process and sort the shopping list into store walking order.",
+      "fields": {
+        "force_refresh": {
+          "name": "Force Refresh",
+          "description": "Bypass local cache and query Kroger fresh."
+        }
+      }
+    }
+  }
+}

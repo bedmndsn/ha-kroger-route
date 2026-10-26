@@ -4,6 +4,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import logging
 import os
+import time
 from typing import Any
 
 import yaml
@@ -28,6 +29,7 @@ from .const import (
     CONF_STORE_NAME,
     CONF_TODO_ENTITY,
     CONF_TYPO_FIXES,
+    DEFAULT_CACHE_TTL,
     DEFAULT_IGNORE_ITEMS,
     DEFAULT_LAYOUT_PRESET,
     DEFAULT_SCAN_INTERVAL,
@@ -89,7 +91,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     async def _handle_refresh_route(call: ServiceCall) -> None:
         force = call.data.get(ATTR_FORCE_REFRESH, False)
-        await coordinator.async_refresh_route(force_refresh=force)
+        target_location = call.data.get(CONF_LOCATION_ID)
+        for entry_coordinator in hass.data[DOMAIN].values():
+            if target_location and entry_coordinator.location_id != target_location:
+                continue
+            await entry_coordinator.async_refresh_route(force_refresh=force)
 
     if not hass.services.has_service(DOMAIN, SERVICE_REFRESH_ROUTE):
         hass.services.async_register(DOMAIN, SERVICE_REFRESH_ROUTE, _handle_refresh_route)
@@ -126,6 +132,7 @@ class KrogerRouteCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.client = client
         self.entry = entry
         self._existing_items: dict[str, dict[str, Any]] = {}
+        self._cache_timestamps: dict[str, float] = {}
         self._mappings: dict[str, Any] = {
             "ignore_items": set(),
             "typos": {},
@@ -224,6 +231,7 @@ class KrogerRouteCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Manually trigger route rebuild."""
         if force_refresh:
             self._existing_items.clear()
+            self._cache_timestamps.clear()
         await self.async_request_refresh()
 
     async def _async_update_data(self) -> dict[str, Any]:
@@ -255,7 +263,8 @@ class KrogerRouteCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 continue
 
             cached = self._existing_items.get(orig_lower)
-            if cached and cached.get("aisle") != "UNSORTED":
+            cache_age = time.monotonic() - self._cache_timestamps.get(orig_lower, 0.0)
+            if cached and cached.get("aisle") != "UNSORTED" and cache_age < DEFAULT_CACHE_TTL.total_seconds():
                 aisle = cached["aisle"]
                 price = cached["price"]
                 product_title = cached["product_title"]
@@ -284,6 +293,8 @@ class KrogerRouteCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 image = result.get("image", "")
                 unmapped = result.get("unmapped", False)
                 note = result.get("note")
+                if aisle != "UNSORTED":
+                    self._cache_timestamps[orig_lower] = time.monotonic()
 
             if unmapped:
                 unmapped_items.append(name)
@@ -312,6 +323,9 @@ class KrogerRouteCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         processed_items.sort(key=sort_key)
 
         self._existing_items = {i["name"].lower(): i for i in processed_items}
+        self._cache_timestamps = {
+            name: ts for name, ts in self._cache_timestamps.items() if name in self._existing_items
+        }
 
         return {
             "items": processed_items,

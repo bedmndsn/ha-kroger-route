@@ -9,6 +9,12 @@ refresh_route:
       default: false
       selector:
         boolean: {}
+    location_id:
+      name: Location ID
+      description: Only refresh this store location. If omitted, all configured stores are refreshed.
+      required: false
+      selector:
+        text: {}
 
 process_list:
   name: Process list
@@ -21,3 +27,9 @@ process_list:
       default: false
       selector:
         boolean: {}
+    location_id:
+      name: Location ID
+      description: Only refresh this store location. If omitted, all configured stores are refreshed.
+      required: false
+      selector:
+        text: {}

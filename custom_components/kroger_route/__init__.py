@@ -86,6 +86,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # The backend todo list can lag behind the tap, and the card should not wait for it.
         if data.get("domain") == "todo":
             service = data.get("service")
+            # Ignore read-only queries (e.g. get_items) to avoid infinite refresh loops
+            if service == "get_items":
+                return
             service_data = data.get("service_data") or {}
             if service == "update_item":
                 item_arg = service_data.get("item")

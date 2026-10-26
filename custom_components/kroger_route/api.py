@@ -178,14 +178,17 @@ class KrogerAPIClient:
         except aiohttp.ClientError as err:
             raise KrogerApiError(f"Network error validating store: {err}") from err
 
-    async def async_get_product_by_id(self, product_id: str, location_id: str) -> dict[str, Any] | None:
-        """Query Kroger API directly by product ID / UPC."""
+    async def _fetch_json_with_retry(
+        self,
+        url: str,
+        params: dict[str, str],
+        context_label: str,
+    ) -> tuple[int, dict[str, Any] | None]:
+        """Execute a GET request with 429 backoff and 401/403 token-refresh retry."""
         headers = await self._auth_headers()
-        url = f"{KROGER_PRODUCTS_URL}/{product_id}"
-        params = {"filter.locationId": location_id}
-
         backoff = INITIAL_BACKOFF
         auth_refreshed = False
+
         for attempt in range(1, MAX_RETRIES + 1):
             await self._throttle()
             try:
@@ -198,7 +201,7 @@ class KrogerAPIClient:
                     if resp.status == 429:
                         retry_after = resp.headers.get("Retry-After")
                         wait = float(retry_after) if retry_after and retry_after.isdigit() else backoff
-                        _LOGGER.warning("Rate limit (429) on product ID %s. Backing off %.1fs", product_id, wait)
+                        _LOGGER.warning("Rate limit (429) for %s. Backing off %.1fs", context_label, wait)
                         await asyncio.sleep(wait)
                         backoff *= 2
                         continue
@@ -206,93 +209,57 @@ class KrogerAPIClient:
                     if resp.status in (401, 403) and not auth_refreshed:
                         auth_refreshed = True
                         _LOGGER.warning(
-                            "Auth rejected (HTTP %s) on product ID %s; refreshing token and retrying once",
+                            "Auth rejected (HTTP %s) for %s; refreshing token and retrying once",
                             resp.status,
-                            product_id,
+                            context_label,
                         )
                         try:
                             await self.async_invalidate_token()
                             headers = await self._auth_headers()
                         except KrogerApiError as err:
                             _LOGGER.warning("Token refresh failed: %s", err)
-                            return None
+                            return resp.status, None
                         continue
 
-                    if resp.status == 200:
-                        payload = await resp.json()
-                        data = payload.get("data", {})
-                        if data:
-                            return self._parse_product(data, fallback_name=product_id)
-                    return None
+                    try:
+                        body = await resp.json(content_type=None)
+                    except Exception:
+                        body = None
+
+                    return resp.status, body
             except aiohttp.ClientError as err:
-                _LOGGER.debug("Direct lookup error for %s (attempt %d): %s", product_id, attempt, err)
+                _LOGGER.warning("Network error for %s (attempt %d): %s", context_label, attempt, err)
                 if attempt == MAX_RETRIES:
-                    return None
+                    return 0, None
                 await asyncio.sleep(backoff)
                 backoff *= 2
+
+        return 0, None
+
+    async def async_get_product_by_id(self, product_id: str, location_id: str) -> dict[str, Any] | None:
+        """Query Kroger API directly by product ID / UPC."""
+        url = f"{KROGER_PRODUCTS_URL}/{product_id}"
+        params = {"filter.locationId": location_id}
+        status, body = await self._fetch_json_with_retry(url, params, f"product ID {product_id}")
+        if status == 200 and body:
+            data = body.get("data", {})
+            if data:
+                return self._parse_product(data, fallback_name=product_id)
         return None
 
     async def async_search_product(self, item_name: str, location_id: str) -> dict[str, Any]:
         """Search for a product and return aisle/price/image, or an UNSORTED fallback."""
-        headers = await self._auth_headers()
         params = {"filter.term": item_name, "filter.locationId": location_id, "filter.limit": "1"}
-
-        backoff = INITIAL_BACKOFF
-        auth_refreshed = False
-        for attempt in range(1, MAX_RETRIES + 1):
-            await self._throttle()
-            try:
-                async with self._session.get(
-                    KROGER_PRODUCTS_URL,
-                    headers=headers,
-                    params=params,
-                    proxy=self._proxy_url,
-                ) as resp:
-                    if resp.status == 429:
-                        retry_after = resp.headers.get("Retry-After")
-                        wait = float(retry_after) if retry_after and retry_after.isdigit() else backoff
-                        _LOGGER.warning("Rate limit (429) searching '%s'. Backing off %.1fs", item_name, wait)
-                        await asyncio.sleep(wait)
-                        backoff *= 2
-                        continue
-
-                    if resp.status in (401, 403) and not auth_refreshed:
-                        auth_refreshed = True
-                        _LOGGER.warning(
-                            "Auth rejected (HTTP %s) searching '%s'; refreshing token and retrying once",
-                            resp.status,
-                            item_name,
-                        )
-                        try:
-                            await self.async_invalidate_token()
-                            headers = await self._auth_headers()
-                        except KrogerApiError as err:
-                            _LOGGER.warning("Token refresh failed: %s", err)
-                            return self._unsorted_result(item_name)
-                        continue
-
-                    if resp.status == 400:
-                        body = await resp.json(content_type=None)
-                        code = body.get("errors", {}).get("code", "")
-                        _LOGGER.debug("Search unavailable for '%s' at %s: %s", item_name, location_id, code)
-                        return self._unsorted_result(item_name)
-
-                    if resp.status != 200:
-                        _LOGGER.warning("Kroger product search failed for '%s': HTTP %s", item_name, resp.status)
-                        return self._unsorted_result(item_name)
-
-                    payload = await resp.json()
-                    products = payload.get("data", [])
-                    if not products:
-                        return self._unsorted_result(item_name)
-
-                    return self._parse_product(products[0], fallback_name=item_name)
-            except aiohttp.ClientError as err:
-                _LOGGER.warning("Network error searching '%s' (attempt %d): %s", item_name, attempt, err)
-                if attempt == MAX_RETRIES:
-                    return self._unsorted_result(item_name)
-                await asyncio.sleep(backoff)
-                backoff *= 2
+        status, body = await self._fetch_json_with_retry(KROGER_PRODUCTS_URL, params, f"searching '{item_name}'")
+        if status == 200 and body:
+            products = body.get("data", [])
+            if products:
+                return self._parse_product(products[0], fallback_name=item_name)
+        elif status == 400 and body:
+            code = body.get("errors", {}).get("code", "")
+            _LOGGER.debug("Search unavailable for '%s' at %s: %s", item_name, location_id, code)
+        elif status not in (0, 200):
+            _LOGGER.warning("Kroger product search failed for '%s': HTTP %s", item_name, status)
 
         return self._unsorted_result(item_name)
 
@@ -316,15 +283,13 @@ class KrogerAPIClient:
         if price == 0.0 and "promo" in price_info:
             price = price_info.get("promo", 0.0)
 
-        product_title = product.get("description", fallback_name)
+        product_name = product.get("description", fallback_name)
         image_url = self._extract_image(product)
 
         return {
-            "product_title": product_title,
-            "product_name": product_title,
+            "product_name": product_name,
             "aisle": aisle,
             "price": price,
-            "image": image_url,
             "image_url": image_url,
             "unmapped": False,
             "note": None,
@@ -333,11 +298,9 @@ class KrogerAPIClient:
     @staticmethod
     def _unsorted_result(item_name: str) -> dict[str, Any]:
         return {
-            "product_title": item_name,
             "product_name": item_name,
             "aisle": "UNSORTED",
             "price": 0.0,
-            "image": "",
             "image_url": "",
             "unmapped": True,
             "note": "No match found. Add exact product ID to mappings.yaml under direct_product_ids.",

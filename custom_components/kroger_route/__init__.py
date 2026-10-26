@@ -80,7 +80,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     @callback
     def _handle_todo_service_call(event: Any) -> None:
         data = event.data or {}
-        if data.get("domain") == "todo":
+        if data.get("domain") != "todo":
+            return
+        service_data = data.get("service_data") or {}
+        target = data.get("target") or {}
+        entity_ids = service_data.get("entity_id") or target.get("entity_id")
+        if isinstance(entity_ids, str):
+            entity_ids = [entity_ids]
+        elif not isinstance(entity_ids, (list, tuple, set)):
+            entity_ids = []
+
+        if coordinator.todo_entity in entity_ids:
             hass.async_create_task(coordinator.async_refresh_route())
 
     entry.async_on_unload(
@@ -89,7 +99,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
-    async def _handle_refresh_route(call: ServiceCall) -> None:
+    async def _handle_route_refresh_service(call: ServiceCall) -> None:
         force = call.data.get(ATTR_FORCE_REFRESH, False)
         target_location = call.data.get(CONF_LOCATION_ID)
         for entry_coordinator in hass.data[DOMAIN].values():
@@ -98,10 +108,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             await entry_coordinator.async_refresh_route(force_refresh=force)
 
     if not hass.services.has_service(DOMAIN, SERVICE_REFRESH_ROUTE):
-        hass.services.async_register(DOMAIN, SERVICE_REFRESH_ROUTE, _handle_refresh_route)
+        hass.services.async_register(DOMAIN, SERVICE_REFRESH_ROUTE, _handle_route_refresh_service)
 
+    # process_list is a legacy alias of refresh_route preserved for backwards compatibility with existing automations.
     if not hass.services.has_service(DOMAIN, SERVICE_PROCESS_LIST):
-        hass.services.async_register(DOMAIN, SERVICE_PROCESS_LIST, _handle_refresh_route)
+        hass.services.async_register(DOMAIN, SERVICE_PROCESS_LIST, _handle_route_refresh_service)
 
     return True
 
@@ -266,8 +277,8 @@ class KrogerRouteCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if cached and cached.get("aisle") != "UNSORTED" and cache_age < DEFAULT_CACHE_TTL.total_seconds():
                 aisle = cached["aisle"]
                 price = cached["price"]
-                product_title = cached["product_title"]
-                image = cached.get("image", "")
+                product_name = cached.get("product_name") or cached.get("product_title", orig_lower)
+                image_url = cached.get("image_url") or cached.get("image", "")
                 unmapped = cached.get("unmapped", False)
                 note = cached.get("note")
             else:
@@ -288,8 +299,8 @@ class KrogerRouteCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
                 aisle = result["aisle"]
                 price = result["price"]
-                product_title = result["product_title"]
-                image = result.get("image", "")
+                product_name = result["product_name"]
+                image_url = result.get("image_url", "")
                 unmapped = result.get("unmapped", False)
                 note = result.get("note")
                 if aisle != "UNSORTED":
@@ -298,25 +309,22 @@ class KrogerRouteCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if unmapped:
                 unmapped_items.append(name)
 
-            if not any(p["name"].lower() == orig_lower for p in processed_items):
-                processed_items.append(
-                    {
-                        "uid": uid,
-                        "name": name,
-                        "raw_search": name,
-                        "product_title": product_title,
-                        "product_name": product_title,
-                        "aisle": aisle,
-                        "price": price,
-                        "image": image,
-                        "image_url": image,
-                        "status": status,
-                        "completed": status == "completed",
-                        "unmapped": unmapped,
-                        "note": note,
-                    }
-                )
-                total_cost += price or 0.0
+            processed_items.append(
+                {
+                    "uid": uid,
+                    "name": name,
+                    "raw_search": name,
+                    "product_name": product_name,
+                    "aisle": aisle,
+                    "price": price,
+                    "image_url": image_url,
+                    "status": status,
+                    "completed": status == "completed",
+                    "unmapped": unmapped,
+                    "note": note,
+                }
+            )
+            total_cost += price or 0.0
 
         sort_key = build_route(self.layout_order)
         processed_items.sort(key=sort_key)
@@ -328,7 +336,6 @@ class KrogerRouteCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         return {
             "items": processed_items,
-            "total_cost": round(total_cost, 2),
             "total_estimated_cost": f"{total_cost:.2f}",
             "location_id": self.location_id,
             "todo_entity": self.todo_entity,
@@ -358,25 +365,33 @@ class KrogerRouteCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self,
         raw_items: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
-        """Deduplicate items on the HA todo list and purge duplicates."""
+        """Deduplicate items on the HA todo list, purging exact duplicates and keeping first by name."""
         seen_keys: set[tuple[str, str]] = set()
+        seen_names: set[str] = set()
         uids_to_remove: list[str] = []
         unique_items: list[dict[str, Any]] = []
 
         for item in raw_items:
             uid = item.get("uid")
-            name = item.get("summary", "").strip().lower()
+            name = item.get("summary", "").strip()
+            name_lower = name.lower()
             status = item.get("status", "needs_action")
             if not name:
                 continue
 
-            key = (name, status)
+            # Purge duplicate entries with identical (name, status) from the HA todo list
+            key = (name_lower, status)
             if key in seen_keys:
                 if uid:
                     uids_to_remove.append(uid)
-            else:
-                seen_keys.add(key)
-                unique_items.append(item)
+                continue
+            seen_keys.add(key)
+
+            # In the final route, first occurrence by name wins
+            if name_lower in seen_names:
+                continue
+            seen_names.add(name_lower)
+            unique_items.append(item)
 
         for uid in uids_to_remove:
             try:

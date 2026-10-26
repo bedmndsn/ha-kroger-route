@@ -73,14 +73,14 @@ From the integration's entry in **Settings > Devices & Services**, click
   "items": [
     {
       "name": "bread",
-      "product_title": "Private Selection Whole Wheat Bread",
+      "product_name": "Private Selection Whole Wheat Bread",
       "aisle": "Aisle 02",
       "price": 2.99,
-      "image": "https://...",
+      "image_url": "https://...",
       "completed": false
     }
   ],
-  "total_estimated_cost": 3.49,
+  "total_estimated_cost": "3.49",
   "location_id": "01400123",
   "todo_entity": "todo.shopping_list",
   "preset_used": "standard_right"

@@ -11,7 +11,13 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import CONF_LOCATION_ID, CONF_STORE_NAME, DOMAIN
+from .const import (
+    CONF_LAYOUT_PRESET,
+    CONF_LOCATION_ID,
+    CONF_STORE_NAME,
+    DEFAULT_LAYOUT_PRESET,
+    DOMAIN,
+)
 
 
 async def async_setup_entry(
@@ -39,6 +45,9 @@ class KrogerRouteSensor(CoordinatorEntity, SensorEntity, RestoreEntity):
 
         self._restored_items: list[dict[str, Any]] = []
         self._restored_total_cost: str = "0.00"
+        self._restored_location_id: str | None = location_id
+        self._restored_todo_entity: str | None = coordinator.todo_entity
+        self._restored_preset_used: str | None = entry.options.get(CONF_LAYOUT_PRESET, DEFAULT_LAYOUT_PRESET)
         self._restored_unmapped: list[str] = []
         self._restored_last_sync: str | None = None
 
@@ -49,6 +58,9 @@ class KrogerRouteSensor(CoordinatorEntity, SensorEntity, RestoreEntity):
             attrs = last_state.attributes
             self._restored_items = attrs.get("items", [])
             self._restored_total_cost = attrs.get("total_estimated_cost", "0.00")
+            self._restored_location_id = attrs.get("location_id", self._restored_location_id)
+            self._restored_todo_entity = attrs.get("todo_entity", self._restored_todo_entity)
+            self._restored_preset_used = attrs.get("preset_used", self._restored_preset_used)
             self._restored_unmapped = attrs.get("unmapped_items", [])
             self._restored_last_sync = attrs.get("last_sync")
 
@@ -65,10 +77,8 @@ class KrogerRouteSensor(CoordinatorEntity, SensorEntity, RestoreEntity):
         data = self.coordinator.data or {}
         if data:
             return {
-                "friendly_name": self._attr_name,
                 "items": data.get("items", []),
                 "total_estimated_cost": data.get("total_estimated_cost", "0.00"),
-                "total_cost": data.get("total_cost", 0.0),
                 "location_id": data.get("location_id"),
                 "todo_entity": data.get("todo_entity"),
                 "preset_used": data.get("preset_used"),
@@ -77,9 +87,11 @@ class KrogerRouteSensor(CoordinatorEntity, SensorEntity, RestoreEntity):
             }
 
         return {
-            "friendly_name": self._attr_name,
             "items": self._restored_items,
             "total_estimated_cost": self._restored_total_cost,
+            "location_id": self._restored_location_id,
+            "todo_entity": self._restored_todo_entity,
+            "preset_used": self._restored_preset_used,
             "unmapped_items": self._restored_unmapped,
             "last_sync": self._restored_last_sync,
         }

@@ -91,7 +91,7 @@ class KrogerAPIClient:
                     if resp.status != 200:
                         raise KrogerAuthError(f"Failed to authenticate with Kroger: HTTP {resp.status}")
                     payload = await resp.json()
-            except aiohttp.ClientError as err:
+            except (aiohttp.ClientError, ValueError) as err:
                 raise KrogerApiError(f"Network error during authentication: {err}") from err
 
             token = payload.get("access_token")
@@ -99,8 +99,18 @@ class KrogerAPIClient:
                 raise KrogerAuthError("Kroger token response did not include an access_token")
 
             self._token = token
-            self._token_expiry = time.monotonic() + payload.get("expires_in", 1800) - 60
+            try:
+                expires_in = float(payload.get("expires_in", 1800))
+            except (TypeError, ValueError):
+                expires_in = 1800
+            self._token_expiry = time.monotonic() + max(expires_in - 60, 0)
             return token
+
+    async def async_invalidate_token(self) -> None:
+        """Drop the cached token so the next call fetches a fresh one."""
+        async with self._lock:
+            self._token = None
+            self._token_expiry = 0.0
 
     async def _auth_headers(self) -> dict[str, str]:
         token = await self.async_get_token()
@@ -175,6 +185,7 @@ class KrogerAPIClient:
         params = {"filter.locationId": location_id}
 
         backoff = INITIAL_BACKOFF
+        auth_refreshed = False
         for attempt in range(1, MAX_RETRIES + 1):
             await self._throttle()
             try:
@@ -190,6 +201,21 @@ class KrogerAPIClient:
                         _LOGGER.warning("Rate limit (429) on product ID %s. Backing off %.1fs", product_id, wait)
                         await asyncio.sleep(wait)
                         backoff *= 2
+                        continue
+
+                    if resp.status in (401, 403) and not auth_refreshed:
+                        auth_refreshed = True
+                        _LOGGER.warning(
+                            "Auth rejected (HTTP %s) on product ID %s; refreshing token and retrying once",
+                            resp.status,
+                            product_id,
+                        )
+                        try:
+                            await self.async_invalidate_token()
+                            headers = await self._auth_headers()
+                        except KrogerApiError as err:
+                            _LOGGER.warning("Token refresh failed: %s", err)
+                            return None
                         continue
 
                     if resp.status == 200:
@@ -212,6 +238,7 @@ class KrogerAPIClient:
         params = {"filter.term": item_name, "filter.locationId": location_id, "filter.limit": "1"}
 
         backoff = INITIAL_BACKOFF
+        auth_refreshed = False
         for attempt in range(1, MAX_RETRIES + 1):
             await self._throttle()
             try:
@@ -227,6 +254,21 @@ class KrogerAPIClient:
                         _LOGGER.warning("Rate limit (429) searching '%s'. Backing off %.1fs", item_name, wait)
                         await asyncio.sleep(wait)
                         backoff *= 2
+                        continue
+
+                    if resp.status in (401, 403) and not auth_refreshed:
+                        auth_refreshed = True
+                        _LOGGER.warning(
+                            "Auth rejected (HTTP %s) searching '%s'; refreshing token and retrying once",
+                            resp.status,
+                            item_name,
+                        )
+                        try:
+                            await self.async_invalidate_token()
+                            headers = await self._auth_headers()
+                        except KrogerApiError as err:
+                            _LOGGER.warning("Token refresh failed: %s", err)
+                            return self._unsorted_result(item_name)
                         continue
 
                     if resp.status == 400:

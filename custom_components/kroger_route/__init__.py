@@ -239,8 +239,7 @@ class KrogerRouteCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         try:
             raw_items = await self._async_fetch_todo_items()
         except Exception as err:
-            _LOGGER.warning("Error fetching todo items from %s: %s", self.todo_entity, err)
-            raw_items = []
+            raise UpdateFailed(f"Error fetching todo items from {self.todo_entity}: {err}") from err
 
         unique_items = await self._async_deduplicate_todo_items(raw_items)
 

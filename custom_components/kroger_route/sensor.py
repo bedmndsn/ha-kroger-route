@@ -1,6 +1,7 @@
 """Sensor platform for the Kroger & Ralphs Route Planner integration."""
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from homeassistant.components.sensor import SensorEntity
@@ -33,7 +34,8 @@ class KrogerRouteSensor(CoordinatorEntity, SensorEntity, RestoreEntity):
         store_name = entry.data.get(CONF_STORE_NAME, location_id)
         self._attr_unique_id = f"kroger_route_{location_id}"
         self._attr_name = f"Kroger Route ({store_name})"
-        self.entity_id = "sensor.kroger_shopping_route"
+        location_slug = re.sub(r"[^a-z0-9_]", "_", location_id.lower())
+        self.entity_id = f"sensor.kroger_route_{location_slug}"
 
         self._restored_items: list[dict[str, Any]] = []
         self._restored_total_cost: str = "0.00"

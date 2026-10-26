@@ -23,6 +23,7 @@ CONF_DIRECT_PRODUCT_IDS = "direct_product_ids"
 DEFAULT_TODO_ENTITY = "todo.shopping_list"
 DEFAULT_LAYOUT_PRESET = "standard_right"
 DEFAULT_SCAN_INTERVAL = timedelta(seconds=30)
+DEFAULT_CACHE_TTL = timedelta(hours=24)  # re-search cached items older than this
 DEFAULT_RATE_LIMIT_DELAY = 0.3  # seconds between API requests
 MAX_RETRIES = 3
 INITIAL_BACKOFF = 1.0

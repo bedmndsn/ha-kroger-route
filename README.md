@@ -41,8 +41,10 @@ supports product search.
 3. **Select Shopping List** — Pick the `todo.*` entity that holds your
    grocery list (defaults to `todo.shopping_list`).
 
-After setup, a sensor named `Kroger Route (<Store Name>)` is created (e.g.
-`sensor.kroger_shopping_route`).
+After setup, a sensor named `Kroger Route (<Store Name>)` is created with entity ID
+`sensor.kroger_route_<location_id>` (e.g. `sensor.kroger_route_01400123`). Existing
+installs keep their previous entity ID (`sensor.kroger_shopping_route`) via Home
+Assistant's entity registry.
 
 ## Options
 
@@ -64,7 +66,7 @@ From the integration's entry in **Settings > Devices & Services**, click
 
 ## Sensor Attributes
 
-`sensor.kroger_shopping_route` exposes:
+`sensor.kroger_route_01400123` exposes:
 
 ```json
 {
@@ -97,10 +99,10 @@ type: custom:html-template-card
 title: 🛒 Kroger Route Planner
 ignore_line_breaks: true
 entities:
-  - sensor.kroger_shopping_route
+  - sensor.kroger_route_01400123
 content: |
-  {% set route = state_attr('sensor.kroger_shopping_route', 'items') %}
-  {% set total = state_attr('sensor.kroger_shopping_route', 'total_estimated_cost') %}
+  {% set route = state_attr('sensor.kroger_route_01400123', 'items') %}
+  {% set total = state_attr('sensor.kroger_route_01400123', 'total_estimated_cost') %}
 
   {% if route and route | length > 0 %}
     <div style="font-size: 20px; font-weight: bold; margin-bottom: 16px; padding-bottom: 8px; border-bottom: 1px solid var(--divider-color);">
@@ -194,7 +196,7 @@ cards:
   - type: markdown
     title: 🛒 Kroger Route Planner
     content: >-
-      {% set items = state_attr('sensor.kroger_shopping_route', 'items') %}
+      {% set items = state_attr('sensor.kroger_route_01400123', 'items') %}
       {% if items %}
         {% for item in items %}
           **{{ item.aisle }}**: {{ item.name }} _(${{ item.price }})_
@@ -224,7 +226,7 @@ action:
     data:
       title: "🛒 Kroger Route Planner"
       message: >-
-        {% set items = state_attr('sensor.kroger_shopping_route', 'items') %}
+        {% set items = state_attr('sensor.kroger_route_01400123', 'items') %}
         {% for item in items %}
         • {{ item.aisle }}: {{ item.name }}
         {% endfor %}

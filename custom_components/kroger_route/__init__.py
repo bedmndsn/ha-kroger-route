@@ -80,17 +80,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     @callback
     def _handle_todo_service_call(event: Any) -> None:
         data = event.data or {}
-        if data.get("domain") != "todo":
-            return
-        service_data = data.get("service_data") or {}
-        target = data.get("target") or {}
-        entity_ids = service_data.get("entity_id") or target.get("entity_id")
-        if isinstance(entity_ids, str):
-            entity_ids = [entity_ids]
-        elif not isinstance(entity_ids, (list, tuple, set)):
-            entity_ids = []
-
-        if coordinator.todo_entity in entity_ids:
+        # Deliberate intent trigger (not duplication): the bus listener fires on intent
+        # (the service call) so the Lovelace card updates instantly, while the state-change
+        # listener fires later on confirmation once the todo entity state actually propagates.
+        # The backend todo list can lag behind the tap, and the card should not wait for it.
+        if data.get("domain") == "todo":
             hass.async_create_task(coordinator.async_refresh_route())
 
     entry.async_on_unload(

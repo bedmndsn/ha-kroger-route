@@ -85,6 +85,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # listener fires later on confirmation once the todo entity state actually propagates.
         # The backend todo list can lag behind the tap, and the card should not wait for it.
         if data.get("domain") == "todo":
+            service = data.get("service")
+            service_data = data.get("service_data") or {}
+            if service == "update_item":
+                item_arg = service_data.get("item")
+                new_status = service_data.get("status")
+                if item_arg and new_status:
+                    uids = [item_arg] if isinstance(item_arg, str) else (item_arg if isinstance(item_arg, list) else [])
+                    for uid in uids:
+                        coordinator.async_apply_optimistic_status(str(uid), str(new_status))
             hass.async_create_task(coordinator.async_refresh_route())
 
     entry.async_on_unload(
@@ -138,6 +147,7 @@ class KrogerRouteCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.entry = entry
         self._existing_items: dict[str, dict[str, Any]] = {}
         self._cache_timestamps: dict[str, float] = {}
+        self._pending_todo_status: dict[str, tuple[str, float]] = {}
         self._mappings: dict[str, Any] = {
             "ignore_items": set(),
             "typos": {},
@@ -232,6 +242,30 @@ class KrogerRouteCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return [part.strip() for part in custom_layout.split(",") if part.strip()]
         return STORE_PRESETS.get(preset_key, STORE_PRESETS[DEFAULT_LAYOUT_PRESET])["order"]
 
+    @callback
+    def async_apply_optimistic_status(self, uid: str, status: str) -> None:
+        """Optimistically update item status in memory so frontend updates instantly."""
+        self._pending_todo_status[uid] = (status, time.monotonic() + 15.0)
+        if not self.data or "items" not in self.data:
+            return
+
+        updated = False
+        updated_items = []
+        for item in self.data["items"]:
+            if item.get("uid") == uid:
+                new_item = dict(item)
+                new_item["status"] = status
+                new_item["completed"] = (status == "completed")
+                updated_items.append(new_item)
+                updated = True
+            else:
+                updated_items.append(item)
+
+        if updated:
+            new_data = dict(self.data)
+            new_data["items"] = updated_items
+            self.async_set_updated_data(new_data)
+
     async def async_refresh_route(self, force_refresh: bool = False) -> None:
         """Manually trigger route rebuild."""
         if force_refresh:
@@ -246,7 +280,27 @@ class KrogerRouteCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         except Exception as err:
             raise UpdateFailed(f"Error fetching todo items from {self.todo_entity}: {err}") from err
 
-        unique_items = await self._async_deduplicate_todo_items(raw_items)
+        now = time.monotonic()
+        # Clean expired pending statuses and apply active optimistic overrides against backend lag
+        self._pending_todo_status = {
+            uid: (st, exp) for uid, (st, exp) in self._pending_todo_status.items() if exp > now
+        }
+
+        patched_items = []
+        for item in raw_items:
+            item_copy = dict(item)
+            uid = item_copy.get("uid")
+            if uid and uid in self._pending_todo_status:
+                pending_st, _ = self._pending_todo_status[uid]
+                if item_copy.get("status") == pending_st:
+                    # Backend has caught up and confirmed the status
+                    self._pending_todo_status.pop(uid, None)
+                else:
+                    # Backend still lags: enforce optimistic status
+                    item_copy["status"] = pending_st
+            patched_items.append(item_copy)
+
+        unique_items = await self._async_deduplicate_todo_items(patched_items)
 
         ignore_items = self._mappings["ignore_items"]
         typos = self._mappings["typos"]
